@@ -15,9 +15,10 @@ import (
 
 // ClientOptions defines the options for the client.
 type ClientOptions struct {
-	BaseURL   string        // Optional proxy base URL
-	AuthToken string        // Optional authorization token
-	Timeout   time.Duration // Optional HTTP timeout
+	BaseURL   string            // Optional proxy base URL
+	AuthToken string            // Optional authorization token
+	Timeout   time.Duration     // Optional HTTP timeout
+	Headers   map[string]string // Optional HTTP headers
 }
 
 // Client defines a client for fetching pages via a remote proxy.
@@ -25,6 +26,7 @@ type Client struct {
 	baseURL    string
 	authToken  string
 	httpClient *http.Client
+	headers    map[string]string
 }
 
 // NewClient creates a new client with the given options.
@@ -36,10 +38,16 @@ func NewClient(options ClientOptions) *Client {
 	return &Client{
 		baseURL:   options.BaseURL,
 		authToken: options.AuthToken,
+		headers:   options.Headers,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 	}
+}
+
+// SetHeader sets a header for the client.
+func (c *Client) SetHeader(key, value string) {
+	c.headers[key] = value
 }
 
 // Fetch a page using a remote proxy.
@@ -58,6 +66,9 @@ func (c *Client) Fetch(ctx context.Context, request *Request) (*Response, error)
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
+	for key, value := range c.headers {
+		httpReq.Header.Set(key, value)
+	}
 	if c.authToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
