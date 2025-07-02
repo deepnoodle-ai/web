@@ -1,6 +1,17 @@
 package fetch
 
-import "context"
+import (
+	"context"
+
+	"github.com/myzie/web"
+)
+
+// Type aliases for convenience.
+type (
+	Link     web.Link
+	Meta     web.Meta
+	Metadata web.Metadata
+)
 
 // Request defines the JSON payload for fetch requests.
 type Request struct {
@@ -19,37 +30,6 @@ type Request struct {
 	Headers         map[string]string `json:"headers,omitempty"`
 }
 
-// Metadata conveys high level information about a page.
-type Metadata struct {
-	Title         string `json:"title,omitempty"`
-	Description   string `json:"description,omitempty"`
-	Language      string `json:"language,omitempty"`
-	Keywords      string `json:"keywords,omitempty"`
-	Author        string `json:"author,omitempty"`
-	Canonical     string `json:"canonical,omitempty"`
-	Heading       string `json:"heading,omitempty"`
-	Robots        string `json:"robots,omitempty"`
-	Image         string `json:"image,omitempty"`
-	Icon          string `json:"icon,omitempty"`
-	PublishedTime string `json:"published_time,omitempty"`
-	Tags          []Meta `json:"tags,omitempty"`
-}
-
-// Link represents a link on a page.
-type Link struct {
-	URL  string `json:"url"`
-	Text string `json:"text,omitempty"`
-}
-
-// Meta represents a meta tag on a page.
-type Meta struct {
-	Tag      string `json:"tag"`
-	Name     string `json:"name,omitempty"`
-	Content  string `json:"content,omitempty"`
-	Charset  string `json:"charset,omitempty"`
-	Property string `json:"property,omitempty"`
-}
-
 // Response defines the JSON payload for fetch responses.
 type Response struct {
 	URL        string            `json:"url"`
@@ -61,10 +41,12 @@ type Response struct {
 	PDF        string            `json:"pdf,omitempty"`
 	Error      string            `json:"error,omitempty"`
 	Metadata   Metadata          `json:"metadata,omitempty"`
-	Links      []Link            `json:"links,omitempty"`
+	Links      []*Link           `json:"links,omitempty"`
 }
 
 // Fetcher defines an interface for fetching pages.
 type Fetcher interface {
+
+	// Fetch a webpage and return the response.
 	Fetch(ctx context.Context, request *Request) (*Response, error)
 }

@@ -36,21 +36,21 @@ type Meta struct {
 // Document helps parse and extract information from an HTML document.
 type Document struct {
 	doc  *goquery.Document
-	text string
+	html string
 }
 
 // NewDocument creates a new Document from an HTML string.
-func NewDocument(text string) (*Document, error) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(text))
+func NewDocument(html string) (*Document, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
 	}
-	return &Document{doc: doc, text: text}, nil
+	return &Document{doc: doc, html: html}, nil
 }
 
 // Raw returns the raw HTML text of the document.
 func (d *Document) Raw() string {
-	return d.text
+	return d.html
 }
 
 // GoqueryDocument returns the underlying goquery document.
@@ -58,16 +58,16 @@ func (d *Document) GoqueryDocument() *goquery.Document {
 	return d.doc
 }
 
-// Lang returns the language of the document.
-func (d *Document) Lang() string {
+// Language of the document.
+func (d *Document) Language() string {
 	if s := d.doc.Find("html").First(); len(s.Nodes) > 0 {
 		return strings.ToLower(strings.TrimSpace(s.AttrOr("lang", "")))
 	}
 	return ""
 }
 
-// Canonical returns the canonical URL of the document.
-func (d *Document) Canonical() string {
+// CanonicalURL returns the canonical URL of the document.
+func (d *Document) CanonicalURL() string {
 	if s := d.doc.Find("link[rel='canonical']"); len(s.Nodes) > 0 {
 		return strings.TrimSpace(s.AttrOr("href", ""))
 	}
@@ -253,47 +253,87 @@ func (d *Document) Paragraphs() []string {
 	return paragraphs
 }
 
-// HTML returns the HTML of the document, with optional filtering and prettifying.
-func (d *Document) HTML(options HTMLOptions) (string, error) {
-	// Return the raw text if no options are provided
-	if len(options.RemoveElements) == 0 && !options.Prettify {
-		return d.text, nil
+// Metadata returns the metadata summary for the document.
+func (d *Document) Metadata() Metadata {
+	metadata := Metadata{
+		Title:        d.Title(),
+		Description:  d.Description(),
+		Author:       d.Author(),
+		CanonicalURL: d.CanonicalURL(),
+		Language:     d.Language(),
+		Heading:      d.H1(),
+		Robots:       d.Robots(),
+		Image:        d.Image(),
+		Icon:         d.Icon(),
+		Keywords:     d.Keywords(),
+		Tags:         d.Meta(),
+	}
+	if value := d.PublishedTime(); !value.IsZero() {
+		metadata.PublishedTime = value.Format(time.RFC3339)
+	}
+	return metadata
+}
+
+// RenderOptions contains HTML rendering options.
+type RenderOptions struct {
+	ExcludeTags     []string
+	OnlyMainContent bool
+	Prettify        bool
+}
+
+// IsEmpty returns true if no transformations are requested.
+func (opts RenderOptions) IsEmpty() bool {
+	return len(opts.ExcludeTags) == 0 && !opts.OnlyMainContent && !opts.Prettify
+}
+
+// HasFiltering returns true if any filtering is requested.
+func (opts RenderOptions) HasFiltering() bool {
+	return len(opts.ExcludeTags) > 0 || opts.OnlyMainContent
+}
+
+// Render the document as HTML, with optional transformations.
+func (d *Document) Render(options RenderOptions) (string, error) {
+	if options.IsEmpty() {
+		return d.html, nil
 	}
 
-	text := d.text
+	// HTML before transformations
+	html := d.html
 
-	// Optionally remove elements
-	if options.RemoveElements != nil {
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(d.text))
+	// Optional tag filtering
+	if options.HasFiltering() {
+		copiedDoc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 		if err != nil {
 			return "", err
 		}
-		for _, selector := range options.RemoveElements {
-			doc.Find(selector).Remove()
+		excludeTags := map[string]bool{}
+		for _, tag := range options.ExcludeTags {
+			excludeTags[tag] = true
 		}
-		text, err = doc.Html()
+		if options.OnlyMainContent {
+			for _, tag := range StandardExcludeTags {
+				excludeTags[tag] = true
+			}
+		}
+		for tag := range excludeTags {
+			copiedDoc.Find(tag).Remove()
+		}
+		html, err = copiedDoc.Html()
 		if err != nil {
 			return "", err
 		}
 	}
 
-	// Optionally prettify
+	// Optional prettify
 	if options.Prettify {
-		text = FormatHTML(text)
+		html = FormatHTML(html)
 	}
 
-	return text, nil
+	return html, nil
 }
 
-// HTMLOptions contains options for generating markdown from a document.
-type HTMLOptions struct {
-	RemoveElements []string
-	Prettify       bool
-}
-
-// StandardRemoveElements contains the suggested elements to remove from HTML
-// in order to clean it up before conversion to markdown.
-var StandardRemoveElements = []string{
+// StandardExcludeTags contains the suggested tags to exclude from HTML.
+var StandardExcludeTags = []string{
 	`[role="dialog"]`,
 	`[aria-modal="true"]`,
 	`[id*="cookie"]`,
@@ -312,6 +352,8 @@ var StandardRemoveElements = []string{
 	"button",
 	"svg",
 	"form",
+	"nav",
+	"footer",
 }
 
 // parseKeywords parses the keywords from a string.
