@@ -28,20 +28,22 @@ type Request struct {
 	Formats         []string          `json:"formats,omitempty"`
 	Actions         []Action          `json:"actions,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
+	StorageState    map[string]any    `json:"storage_state,omitempty"`
 }
 
 // Response defines the JSON payload for fetch responses.
 type Response struct {
-	URL        string            `json:"url"`
-	StatusCode int               `json:"status_code"`
-	Headers    map[string]string `json:"headers"`
-	HTML       string            `json:"html,omitempty"`
-	Markdown   string            `json:"markdown,omitempty"`
-	Screenshot string            `json:"screenshot,omitempty"`
-	PDF        string            `json:"pdf,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	Metadata   Metadata          `json:"metadata,omitempty"`
-	Links      []*Link           `json:"links,omitempty"`
+	URL          string            `json:"url"`
+	StatusCode   int               `json:"status_code"`
+	Headers      map[string]string `json:"headers"`
+	HTML         string            `json:"html,omitempty"`
+	Markdown     string            `json:"markdown,omitempty"`
+	Screenshot   string            `json:"screenshot,omitempty"`
+	PDF          string            `json:"pdf,omitempty"`
+	Error        string            `json:"error,omitempty"`
+	Metadata     Metadata          `json:"metadata,omitempty"`
+	Links        []*Link           `json:"links,omitempty"`
+	StorageState map[string]any    `json:"storage_state,omitempty"`
 }
 
 // Fetcher defines an interface for fetching pages.
