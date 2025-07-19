@@ -39,7 +39,7 @@ func ResolveLink(domain, value string) (string, bool) {
 			return "", false
 		}
 		// Normalize and return
-		normalizedURL, err := web.NormalizeURL(parsedURL.String())
+		normalizedURL, err := NormalizeURL(parsedURL.String())
 		if err != nil {
 			return "", false
 		}
@@ -63,7 +63,7 @@ func ResolveLink(domain, value string) (string, bool) {
 	resolvedURL := baseURL.ResolveReference(parsedURL)
 
 	// Normalize and return
-	normalizedURL, err := web.NormalizeURL(resolvedURL.String())
+	normalizedURL, err := NormalizeURL(resolvedURL.String())
 	if err != nil {
 		return "", false
 	}
