@@ -28,6 +28,7 @@ type Request struct {
 	Formats         []string          `json:"formats,omitempty"`
 	Actions         []Action          `json:"actions,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
+	StorageState    map[string]any    `json:"storage_state,omitempty"`
 }
 
 // Response defines the JSON payload for fetch responses.
