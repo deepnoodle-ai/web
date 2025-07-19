@@ -26,12 +26,6 @@ const (
 	FollowNone              FollowBehavior = "none"
 )
 
-// Parser is an interface describing a webpage parser. It accepts the fetched
-// page and returns a parsed object.
-type Parser interface {
-	Parse(ctx context.Context, page *fetch.Response) (any, error)
-}
-
 // Result represents the result of one page being crawled.
 type Result struct {
 	URL      *url.URL
@@ -53,7 +47,7 @@ type Options struct {
 	FetcherName          string
 	RequestDelay         time.Duration
 	KnownURLs            []string
-	Parsers              map[string]Parser
+	ParserRules          []*ParserRule
 	DefaultParser        Parser
 	FollowBehavior       FollowBehavior
 	Logger               *slog.Logger
@@ -73,7 +67,7 @@ type Crawler struct {
 	fetcher              fetch.Fetcher
 	fetcherName          string
 	knownURLs            []string
-	parsers              map[string]Parser
+	parserRules          []*ParserRule
 	defaultParser        Parser
 	followBehavior       FollowBehavior
 	activeWorkers        int64
@@ -82,10 +76,11 @@ type Crawler struct {
 	running              bool
 	showProgress         bool
 	showProgressInterval time.Duration
+	cancel               context.CancelFunc
 }
 
 // New creates a new crawler.
-func New(opts Options) *Crawler {
+func New(opts Options) (*Crawler, error) {
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -96,7 +91,10 @@ func New(opts Options) *Crawler {
 	if opts.QueueSize <= 0 {
 		opts.QueueSize = 10000
 	}
-	return &Crawler{
+	if opts.FollowBehavior == "" {
+		opts.FollowBehavior = FollowSameDomain
+	}
+	c := &Crawler{
 		cache:                opts.Cache,
 		maxURLs:              opts.MaxURLs,
 		workers:              opts.Workers,
@@ -104,15 +102,41 @@ func New(opts Options) *Crawler {
 		fetcher:              opts.Fetcher,
 		fetcherName:          opts.FetcherName,
 		knownURLs:            opts.KnownURLs,
-		parsers:              opts.Parsers,
-		followBehavior:       opts.FollowBehavior,
 		defaultParser:        opts.DefaultParser,
+		followBehavior:       opts.FollowBehavior,
 		stats:                &CrawlerStats{},
 		logger:               logger,
 		showProgress:         opts.ShowProgress,
 		showProgressInterval: opts.ShowProgressInterval,
 		queue:                make(chan string, opts.QueueSize),
 	}
+	if err := c.AddParserRules(opts.ParserRules...); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// sortRulesByPriority sorts parser rules by priority (higher priority first)
+func (c *Crawler) sortRulesByPriority() {
+	sort.Slice(c.parserRules, func(i, j int) bool {
+		return c.parserRules[i].Priority > c.parserRules[j].Priority
+	})
+}
+
+// AddParserRules adds new parser rules to the crawler. The rules will be
+// re-sorted by priority after adding.
+func (c *Crawler) AddParserRules(rule ...*ParserRule) error {
+	for _, rule := range rule {
+		// Compile regex patterns if needed
+		if err := rule.Compile(); err != nil {
+			return err
+		}
+		// Add the rule
+		c.parserRules = append(c.parserRules, rule)
+	}
+	// Re-sort by priority
+	c.sortRulesByPriority()
+	return nil
 }
 
 // incrementActiveWorkers atomically increments the active workers counter
@@ -146,10 +170,11 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	c.running = true
 
 	// This context will be used to stop workers when the work is done
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, c.cancel = context.WithCancel(ctx)
 	defer func() {
 		c.running = false
-		cancel()
+		c.cancel()
+		c.cancel = nil
 	}()
 
 	// Start workers
@@ -166,7 +191,7 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	}
 
 	// Start idle monitor to detect when no more work is available
-	go c.idleMonitor(ctx, cancel)
+	go c.idleMonitor(ctx, c.cancel)
 
 	// Queue initial URLs
 	count, err := c.enqueue(ctx, urls)
@@ -180,6 +205,12 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	// Wait for workers to complete
 	wg.Wait()
 	return nil
+}
+
+func (c *Crawler) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 func (c *Crawler) enqueue(ctx context.Context, urls []string) (int, error) {
@@ -337,9 +368,26 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 }
 
 func (c *Crawler) getParser(domain string) (Parser, bool) {
-	if parser, exists := c.parsers[domain]; exists {
-		return parser, true
+	// Check parser rules (already sorted by priority)
+	for _, rule := range c.parserRules {
+		var matches bool
+		switch rule.Type {
+		case MatchExact:
+			matches = rule.Pattern == domain
+		case MatchSuffix:
+			matches = strings.HasSuffix(domain, rule.Pattern)
+		case MatchPrefix:
+			matches = strings.HasPrefix(domain, rule.Pattern)
+		case MatchRegex, MatchGlob:
+			if rule.compiled != nil {
+				matches = rule.compiled.MatchString(domain)
+			}
+		}
+		if matches {
+			return rule.Parser, true
+		}
 	}
+	// Fall back to default parser
 	if c.defaultParser != nil {
 		return c.defaultParser, true
 	}

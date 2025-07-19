@@ -44,7 +44,7 @@ func main() {
 		MaxBodySize: 10 * 1024 * 1024,
 	})
 
-	c := crawler.New(crawler.Options{
+	c, err := crawler.New(crawler.Options{
 		MaxURLs:        cfg.MaxURLs,
 		Workers:        cfg.Workers,
 		Fetcher:        fetcher,
@@ -52,6 +52,9 @@ func main() {
 		ShowProgress:   true,
 		FollowBehavior: crawler.FollowBehavior(cfg.FollowBehavior),
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	callback := func(ctx context.Context, result *crawler.Result) {
 		if result.Error != nil {

@@ -101,7 +101,8 @@ func TestCrawler_New(t *testing.T) {
 		FollowBehavior: FollowSameDomain,
 	}
 
-	crawler := New(opts)
+	crawler, err := New(opts)
+	require.NoError(t, err)
 
 	assert.NotNil(t, crawler)
 	assert.Equal(t, 100, crawler.maxURLs)
@@ -139,13 +140,14 @@ func TestCrawler_BasicCrawl(t *testing.T) {
 		},
 	})
 
-	crawler := New(Options{
+	crawler, err := New(Options{
 		MaxURLs:        10,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
 		Fetcher:        mockFetcher,
 		FollowBehavior: FollowSameDomain,
 	})
+	require.NoError(t, err)
 
 	var processedURLs []string
 	var processedData []any
@@ -159,7 +161,7 @@ func TestCrawler_BasicCrawl(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := crawler.Crawl(ctx, []string{"https://example.com"}, callback)
+	err = crawler.Crawl(ctx, []string{"https://example.com"}, callback)
 
 	assert.NoError(t, err)
 	assert.Contains(t, processedURLs, "https://example.com")
@@ -186,18 +188,14 @@ func TestCrawler_WithParser(t *testing.T) {
 		return expectedParsedData, nil
 	})
 
-	parsers := map[string]Parser{
-		"example.com": mockParser,
-	}
-
-	crawler := New(Options{
+	crawler, err := New(Options{
 		MaxURLs:        5,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
 		Fetcher:        mockFetcher,
-		Parsers:        parsers,
 		FollowBehavior: FollowNone,
 	})
+	require.NoError(t, err)
 
 	var parsedResults []any
 	mu := sync.Mutex{}
@@ -211,7 +209,7 @@ func TestCrawler_WithParser(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := crawler.Crawl(ctx, []string{"https://example.com"}, callback)
+	err = crawler.Crawl(ctx, []string{"https://example.com"}, callback)
 
 	assert.NoError(t, err)
 	assert.Len(t, parsedResults, 1)
@@ -228,7 +226,7 @@ func TestCrawler_WithCache(t *testing.T) {
 	err := htmlCache.Set(context.Background(), "https://example.com", []byte(testHTML))
 	require.NoError(t, err)
 
-	crawler := New(Options{
+	crawler, err := New(Options{
 		MaxURLs:        5,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
@@ -236,6 +234,7 @@ func TestCrawler_WithCache(t *testing.T) {
 		Cache:          htmlCache,
 		FollowBehavior: FollowNone,
 	})
+	require.NoError(t, err)
 
 	callback := func(ctx context.Context, result *Result) {
 		// The callback won't receive the HTML directly, but we can verify
@@ -408,13 +407,14 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 				workers = 2 // Increase workers for FollowAny to prevent queue overflow
 			}
 
-			crawler := New(Options{
+			crawler, err := New(Options{
 				MaxURLs:        10,
 				Workers:        workers,
 				RequestDelay:   time.Millisecond * 10, // Increase delay to avoid race conditions
 				Fetcher:        mockFetcher,
 				FollowBehavior: tt.followBehavior,
 			})
+			require.NoError(t, err)
 
 			var processedURLs []string
 			mu := sync.Mutex{}
@@ -426,7 +426,7 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err := crawler.Crawl(ctx, []string{tt.baseURL}, callback)
+			err = crawler.Crawl(ctx, []string{tt.baseURL}, callback)
 
 			assert.NoError(t, err)
 
@@ -453,13 +453,14 @@ func TestCrawler_ErrorHandling(t *testing.T) {
 		Links: []*fetch.Link{},
 	})
 
-	crawler := New(Options{
+	crawler, err := New(Options{
 		MaxURLs:        10,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
 		Fetcher:        mockFetcher,
 		FollowBehavior: FollowNone,
 	})
+	require.NoError(t, err)
 
 	var processedURLs []string
 	var errors []error
@@ -475,7 +476,7 @@ func TestCrawler_ErrorHandling(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := crawler.Crawl(ctx, []string{"https://error.com", "https://success.com"}, callback)
+	err = crawler.Crawl(ctx, []string{"https://error.com", "https://success.com"}, callback)
 
 	assert.NoError(t, err)
 	assert.Len(t, processedURLs, 2)
@@ -508,14 +509,14 @@ func TestCrawler_MaxURLsLimit(t *testing.T) {
 		})
 	}
 
-	crawler := New(Options{
+	crawler, err := New(Options{
 		MaxURLs:        3, // Limit to 3 URLs
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
 		Fetcher:        mockFetcher,
 		FollowBehavior: FollowNone,
 	})
-
+	require.NoError(t, err)
 	var processedURLs []string
 	mu := sync.Mutex{}
 
@@ -526,7 +527,7 @@ func TestCrawler_MaxURLsLimit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := crawler.Crawl(ctx, urls, callback)
+	err = crawler.Crawl(ctx, urls, callback)
 
 	assert.NoError(t, err)
 	assert.LessOrEqual(t, len(processedURLs), 3)
