@@ -26,7 +26,7 @@ func Chunk(text string, size int) []string {
 		}
 		// first look for a period
 		found := false
-		for cutoff > minCutoff {
+		for cutoff >= minCutoff {
 			if cutoff < len(runes) && runes[cutoff] == '.' {
 				found = true
 				break
@@ -36,7 +36,7 @@ func Chunk(text string, size int) []string {
 		// if no period found, look for a space
 		if !found {
 			cutoff = size
-			for cutoff > minCutoff {
+			for cutoff >= minCutoff {
 				if cutoff < len(runes) && unicode.IsSpace(runes[cutoff]) {
 					found = true
 					break

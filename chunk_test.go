@@ -29,7 +29,7 @@ func TestChunk(t *testing.T) {
 			name:     "text split at space",
 			text:     "This is a long sentence without periods that should be split at spaces",
 			size:     30,
-			expected: []string{"This is a long sentence withou", "t periods that should be split", "at spaces"},
+			expected: []string{"This is a long sentence", "without periods that should be", "split at spaces"},
 		},
 		{
 			name:     "text with no good split points",
