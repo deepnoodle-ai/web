@@ -97,7 +97,7 @@ func TestCrawler_New(t *testing.T) {
 		MaxURLs:        100,
 		Workers:        2,
 		RequestDelay:   time.Millisecond * 100,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
 		FollowBehavior: FollowSameDomain,
 	}
 
@@ -144,7 +144,7 @@ func TestCrawler_BasicCrawl(t *testing.T) {
 		MaxURLs:        10,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
 		FollowBehavior: FollowSameDomain,
 	})
 	require.NoError(t, err)
@@ -192,7 +192,8 @@ func TestCrawler_WithParser(t *testing.T) {
 		MaxURLs:        5,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
+		DefaultParser:  mockParser,
 		FollowBehavior: FollowNone,
 	})
 	require.NoError(t, err)
@@ -230,7 +231,7 @@ func TestCrawler_WithCache(t *testing.T) {
 		MaxURLs:        5,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
 		Cache:          htmlCache,
 		FollowBehavior: FollowNone,
 	})
@@ -411,7 +412,7 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 				MaxURLs:        10,
 				Workers:        workers,
 				RequestDelay:   time.Millisecond * 10, // Increase delay to avoid race conditions
-				Fetcher:        mockFetcher,
+				DefaultFetcher: mockFetcher,
 				FollowBehavior: tt.followBehavior,
 			})
 			require.NoError(t, err)
@@ -457,7 +458,7 @@ func TestCrawler_ErrorHandling(t *testing.T) {
 		MaxURLs:        10,
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
 		FollowBehavior: FollowNone,
 	})
 	require.NoError(t, err)
@@ -513,7 +514,7 @@ func TestCrawler_MaxURLsLimit(t *testing.T) {
 		MaxURLs:        3, // Limit to 3 URLs
 		Workers:        1,
 		RequestDelay:   time.Millisecond,
-		Fetcher:        mockFetcher,
+		DefaultFetcher: mockFetcher,
 		FollowBehavior: FollowNone,
 	})
 	require.NoError(t, err)

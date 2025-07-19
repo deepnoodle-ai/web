@@ -43,12 +43,12 @@ type Options struct {
 	MaxURLs              int
 	Workers              int
 	Cache                cache.Cache
-	Fetcher              fetch.Fetcher
-	FetcherName          string
 	RequestDelay         time.Duration
 	KnownURLs            []string
 	ParserRules          []*ParserRule
 	DefaultParser        Parser
+	FetcherRules         []*FetcherRule
+	DefaultFetcher       fetch.Fetcher
 	FollowBehavior       FollowBehavior
 	Logger               *slog.Logger
 	ShowProgress         bool
@@ -64,11 +64,11 @@ type Crawler struct {
 	workers              int
 	requestDelay         time.Duration
 	cache                cache.Cache
-	fetcher              fetch.Fetcher
-	fetcherName          string
 	knownURLs            []string
 	parserRules          []*ParserRule
 	defaultParser        Parser
+	fetcherRules         []*FetcherRule
+	defaultFetcher       fetch.Fetcher
 	followBehavior       FollowBehavior
 	activeWorkers        int64
 	stats                *CrawlerStats
@@ -99,8 +99,7 @@ func New(opts Options) (*Crawler, error) {
 		maxURLs:              opts.MaxURLs,
 		workers:              opts.Workers,
 		requestDelay:         opts.RequestDelay,
-		fetcher:              opts.Fetcher,
-		fetcherName:          opts.FetcherName,
+		defaultFetcher:       opts.DefaultFetcher,
 		knownURLs:            opts.KnownURLs,
 		defaultParser:        opts.DefaultParser,
 		followBehavior:       opts.FollowBehavior,
@@ -111,6 +110,9 @@ func New(opts Options) (*Crawler, error) {
 		queue:                make(chan string, opts.QueueSize),
 	}
 	if err := c.AddParserRules(opts.ParserRules...); err != nil {
+		return nil, err
+	}
+	if err := c.AddFetcherRules(opts.FetcherRules...); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -139,6 +141,29 @@ func (c *Crawler) AddParserRules(rule ...*ParserRule) error {
 	return nil
 }
 
+// AddFetcherRules adds new fetcher rules to the crawler. The rules will be
+// re-sorted by priority after adding.
+func (c *Crawler) AddFetcherRules(rules ...*FetcherRule) error {
+	for _, rule := range rules {
+		// Compile regex patterns if needed
+		if err := rule.Compile(); err != nil {
+			return err
+		}
+		// Add the rule
+		c.fetcherRules = append(c.fetcherRules, rule)
+	}
+	// Re-sort by priority
+	c.sortFetcherRulesByPriority()
+	return nil
+}
+
+// sortFetcherRulesByPriority sorts fetcher rules by priority (higher priority first)
+func (c *Crawler) sortFetcherRulesByPriority() {
+	sort.Slice(c.fetcherRules, func(i, j int) bool {
+		return c.fetcherRules[i].Priority > c.fetcherRules[j].Priority
+	})
+}
+
 // incrementActiveWorkers atomically increments the active workers counter
 func (c *Crawler) incrementActiveWorkers() {
 	atomic.AddInt64(&c.activeWorkers, 1)
@@ -152,13 +177,6 @@ func (c *Crawler) decrementActiveWorkers() {
 // getActiveWorkers atomically gets the current active workers count
 func (c *Crawler) getActiveWorkers() int64 {
 	return atomic.LoadInt64(&c.activeWorkers)
-}
-
-func (c *Crawler) getFetcherName() string {
-	if c.fetcherName != "" {
-		return c.fetcherName
-	}
-	return "http"
 }
 
 // Crawl the provided URLs and call the callback for each processed page.
@@ -295,18 +313,30 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 		}
 	}
 
+	// Get the appropriate fetcher for this domain
+	fetcher, exists := c.getFetcher(domain)
+	if !exists {
+		c.logger.Error("no fetcher configured",
+			slog.String("url", rawURL),
+			slog.String("domain", domain))
+		callback(ctx, &Result{URL: parsedURL, Error: errors.New("no fetcher configured for domain")})
+		c.stats.IncrementFailed()
+		return
+	}
+
 	// Create fetch request
 	req := &fetch.Request{
 		URL:             rawURL,
 		Prettify:        false,
 		OnlyMainContent: false,
-		Fetcher:         c.getFetcherName(),
+		// Note: The Fetcher field in Request is for specifying a fetcher name/type
+		// We'll leave it empty and use the actual fetcher instance directly
 	}
 
 	// Fetch if there was not a cache hit
 	if response == nil {
 		c.logger.Debug("fetching", slog.String("url", rawURL))
-		response, err = c.fetcher.Fetch(ctx, req)
+		response, err = fetcher.Fetch(ctx, req)
 		if err != nil {
 			callback(ctx, &Result{URL: parsedURL, Error: err})
 			c.stats.IncrementFailed()
@@ -370,26 +400,28 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 func (c *Crawler) getParser(domain string) (Parser, bool) {
 	// Check parser rules (already sorted by priority)
 	for _, rule := range c.parserRules {
-		var matches bool
-		switch rule.Type {
-		case MatchExact:
-			matches = rule.Pattern == domain
-		case MatchSuffix:
-			matches = strings.HasSuffix(domain, rule.Pattern)
-		case MatchPrefix:
-			matches = strings.HasPrefix(domain, rule.Pattern)
-		case MatchRegex, MatchGlob:
-			if rule.compiled != nil {
-				matches = rule.compiled.MatchString(domain)
-			}
-		}
-		if matches {
+		if rule.Matches(domain) {
 			return rule.Parser, true
 		}
 	}
 	// Fall back to default parser
 	if c.defaultParser != nil {
 		return c.defaultParser, true
+	}
+	return nil, false
+}
+
+// getFetcher returns the appropriate fetcher for the given domain based on rules
+func (c *Crawler) getFetcher(domain string) (fetch.Fetcher, bool) {
+	// Check fetcher rules (already sorted by priority)
+	for _, rule := range c.fetcherRules {
+		if rule.Matches(domain) {
+			return rule.Fetcher, true
+		}
+	}
+	// Fall back to default fetcher
+	if c.defaultFetcher != nil {
+		return c.defaultFetcher, true
 	}
 	return nil, false
 }
