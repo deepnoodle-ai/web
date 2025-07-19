@@ -94,126 +94,88 @@ func globToRegex(pattern string) string {
 	return "^" + pattern + "$"
 }
 
-// Parser Rule Constructors
+// ParserRuleOption defines a function that modifies a ParserRule
+type ParserRuleOption func(*ParserRule)
 
-// NewExactParserRule creates a parser rule that matches domains exactly
-func NewExactParserRule(domain string, parser Parser, priority int) *ParserRule {
-	return &ParserRule{
-		MatchRule: MatchRule{
-			Pattern:  domain,
-			Type:     MatchExact,
-			Priority: priority,
-		},
-		Parser: parser,
+// WithParserPriority sets the priority for a parser rule
+func WithParserPriority(priority int) ParserRuleOption {
+	return func(r *ParserRule) {
+		r.Priority = priority
 	}
 }
 
-// NewRegexParserRule creates a parser rule that matches domains using a regular expression
-func NewRegexParserRule(pattern string, parser Parser, priority int) *ParserRule {
-	return &ParserRule{
+// WithParserMatchType sets the match type for a parser rule
+func WithParserMatchType(matchType MatchType) ParserRuleOption {
+	return func(r *ParserRule) {
+		r.Type = matchType
+	}
+}
+
+// NewParserRule creates a new parser rule with the given pattern and parser.
+// By default, it uses exact matching with priority 0.
+// Use functional options to customize behavior.
+//
+// Example:
+//
+//	rule := NewParserRule("example.com", parser, WithParserPriority(10))
+//	rule := NewParserRule("*.example.com", parser, WithParserMatchType(MatchGlob), WithParserPriority(5))
+func NewParserRule(pattern string, parser Parser, opts ...ParserRuleOption) *ParserRule {
+	rule := &ParserRule{
 		MatchRule: MatchRule{
 			Pattern:  pattern,
-			Type:     MatchRegex,
-			Priority: priority,
+			Type:     MatchExact, // default to exact matching
+			Priority: 0,          // default priority
 		},
 		Parser: parser,
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(rule)
+	}
+
+	return rule
 }
 
-// NewSuffixParserRule creates a parser rule that matches domains by suffix (e.g., ".com", ".org")
-func NewSuffixParserRule(suffix string, parser Parser, priority int) *ParserRule {
-	return &ParserRule{
-		MatchRule: MatchRule{
-			Pattern:  suffix,
-			Type:     MatchSuffix,
-			Priority: priority,
-		},
-		Parser: parser,
+// FetcherRuleOption defines a function that modifies a FetcherRule
+type FetcherRuleOption func(*FetcherRule)
+
+// WithFetcherPriority sets the priority for a fetcher rule
+func WithFetcherPriority(priority int) FetcherRuleOption {
+	return func(r *FetcherRule) {
+		r.Priority = priority
 	}
 }
 
-// NewPrefixParserRule creates a parser rule that matches domains by prefix (e.g., "blog.", "api.")
-func NewPrefixParserRule(prefix string, parser Parser, priority int) *ParserRule {
-	return &ParserRule{
-		MatchRule: MatchRule{
-			Pattern:  prefix,
-			Type:     MatchPrefix,
-			Priority: priority,
-		},
-		Parser: parser,
+// WithFetcherMatchType sets the match type for a fetcher rule
+func WithFetcherMatchType(matchType MatchType) FetcherRuleOption {
+	return func(r *FetcherRule) {
+		r.Type = matchType
 	}
 }
 
-// NewGlobParserRule creates a parser rule that matches domains using glob patterns (e.g., "*.example.com")
-func NewGlobParserRule(pattern string, parser Parser, priority int) *ParserRule {
-	return &ParserRule{
+// NewFetcherRule creates a new fetcher rule with the given pattern and fetcher.
+// By default, it uses exact matching with priority 0.
+// Use functional options to customize behavior.
+//
+// Example:
+//
+//	rule := NewFetcherRule("example.com", fetcher, WithFetcherPriority(10))
+//	rule := NewFetcherRule("*.example.com", fetcher, WithFetcherMatchType(MatchGlob), WithFetcherPriority(5))
+func NewFetcherRule(pattern string, fetcher fetch.Fetcher, opts ...FetcherRuleOption) *FetcherRule {
+	rule := &FetcherRule{
 		MatchRule: MatchRule{
 			Pattern:  pattern,
-			Type:     MatchGlob,
-			Priority: priority,
-		},
-		Parser: parser,
-	}
-}
-
-// Fetcher Rule Constructors
-
-// NewExactFetcherRule creates a fetcher rule that matches domains exactly
-func NewExactFetcherRule(domain string, fetcher fetch.Fetcher, priority int) *FetcherRule {
-	return &FetcherRule{
-		MatchRule: MatchRule{
-			Pattern:  domain,
-			Type:     MatchExact,
-			Priority: priority,
+			Type:     MatchExact, // default to exact matching
+			Priority: 0,          // default priority
 		},
 		Fetcher: fetcher,
 	}
-}
 
-// NewRegexFetcherRule creates a fetcher rule that matches domains using a regular expression
-func NewRegexFetcherRule(pattern string, fetcher fetch.Fetcher, priority int) *FetcherRule {
-	return &FetcherRule{
-		MatchRule: MatchRule{
-			Pattern:  pattern,
-			Type:     MatchRegex,
-			Priority: priority,
-		},
-		Fetcher: fetcher,
+	// Apply options
+	for _, opt := range opts {
+		opt(rule)
 	}
-}
 
-// NewSuffixFetcherRule creates a fetcher rule that matches domains by suffix (e.g., ".com", ".org")
-func NewSuffixFetcherRule(suffix string, fetcher fetch.Fetcher, priority int) *FetcherRule {
-	return &FetcherRule{
-		MatchRule: MatchRule{
-			Pattern:  suffix,
-			Type:     MatchSuffix,
-			Priority: priority,
-		},
-		Fetcher: fetcher,
-	}
-}
-
-// NewPrefixFetcherRule creates a fetcher rule that matches domains by prefix (e.g., "blog.", "api.")
-func NewPrefixFetcherRule(prefix string, fetcher fetch.Fetcher, priority int) *FetcherRule {
-	return &FetcherRule{
-		MatchRule: MatchRule{
-			Pattern:  prefix,
-			Type:     MatchPrefix,
-			Priority: priority,
-		},
-		Fetcher: fetcher,
-	}
-}
-
-// NewGlobFetcherRule creates a fetcher rule that matches domains using glob patterns (e.g., "*.example.com")
-func NewGlobFetcherRule(pattern string, fetcher fetch.Fetcher, priority int) *FetcherRule {
-	return &FetcherRule{
-		MatchRule: MatchRule{
-			Pattern:  pattern,
-			Type:     MatchGlob,
-			Priority: priority,
-		},
-		Fetcher: fetcher,
-	}
+	return rule
 }

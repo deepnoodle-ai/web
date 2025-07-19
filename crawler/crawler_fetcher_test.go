@@ -45,9 +45,9 @@ func TestCrawlerWithFetcherRules(t *testing.T) {
 
 	// Create fetcher rules
 	fetcherRules := []*FetcherRule{
-		NewExactFetcherRule("special.example.com", specialFetcher, 100),
-		NewSuffixFetcherRule(".gov", govFetcher, 90),
-		NewPrefixFetcherRule("api.", apiFetcher, 80),
+		NewFetcherRule("special.example.com", specialFetcher, WithFetcherPriority(100)),
+		NewFetcherRule(".gov", govFetcher, WithFetcherMatchType(MatchSuffix), WithFetcherPriority(90)),
+		NewFetcherRule("api.", apiFetcher, WithFetcherMatchType(MatchPrefix), WithFetcherPriority(80)),
 	}
 
 	// Create crawler with fetcher rules
@@ -108,8 +108,8 @@ func TestCrawlerWithFetcherRulePriority(t *testing.T) {
 
 	// Create overlapping rules with different priorities
 	fetcherRules := []*FetcherRule{
-		NewSuffixFetcherRule(".com", lowPriorityFetcher, 50),   // Lower priority
-		NewPrefixFetcherRule("api.", highPriorityFetcher, 100), // Higher priority
+		NewFetcherRule(".com", lowPriorityFetcher, WithFetcherMatchType(MatchSuffix), WithFetcherPriority(50)),   // Lower priority
+		NewFetcherRule("api.", highPriorityFetcher, WithFetcherMatchType(MatchPrefix), WithFetcherPriority(100)), // Higher priority
 	}
 
 	// Create crawler
@@ -143,7 +143,7 @@ func TestCrawlerWithNoMatchingFetcher(t *testing.T) {
 	specialFetcher := fetch.NewMockFetcher()
 
 	fetcherRules := []*FetcherRule{
-		NewExactFetcherRule("special.example.com", specialFetcher, 100),
+		NewFetcherRule("special.example.com", specialFetcher, WithFetcherPriority(100)),
 	}
 
 	c, err := New(Options{
@@ -197,10 +197,10 @@ func TestCrawlerMixedRules(t *testing.T) {
 
 	// Create rules
 	fetcherRules := []*FetcherRule{
-		NewExactFetcherRule("example.com", mockFetcher, 100),
+		NewFetcherRule("example.com", mockFetcher, WithFetcherPriority(100)),
 	}
 	parserRules := []*ParserRule{
-		NewExactParserRule("example.com", mockParser, 100),
+		NewParserRule("example.com", mockParser, WithParserPriority(100)),
 	}
 
 	// Create crawler with both types of rules
@@ -259,7 +259,12 @@ func TestCrawlerWithRegexFetcherRule(t *testing.T) {
 
 	// Create regex rule that matches subdomains with specific pattern
 	fetcherRules := []*FetcherRule{
-		NewRegexFetcherRule(`^(blog|news)\..*\.com$`, regexFetcher, 100),
+		NewFetcherRule(
+			`^(blog|news)\..*\.com$`,
+			regexFetcher,
+			WithFetcherPriority(100),
+			WithFetcherMatchType(MatchRegex),
+		),
 	}
 
 	c, err := New(Options{
@@ -346,7 +351,12 @@ func TestCrawlerWithGlobFetcherRule(t *testing.T) {
 
 	// Create glob rule
 	fetcherRules := []*FetcherRule{
-		NewGlobFetcherRule("api.*.example.com", globFetcher, 100),
+		NewFetcherRule(
+			"api.*.example.com",
+			globFetcher,
+			WithFetcherPriority(100),
+			WithFetcherMatchType(MatchGlob),
+		),
 	}
 
 	c, err := New(Options{
@@ -408,7 +418,7 @@ func TestAddFetcherRulesAfterCreation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add fetcher rule after creation
-	err = c.AddFetcherRules(NewExactFetcherRule("special.example.com", additionalFetcher, 100))
+	err = c.AddFetcherRules(NewFetcherRule("special.example.com", additionalFetcher, WithFetcherPriority(100)))
 	require.NoError(t, err)
 
 	// Track results

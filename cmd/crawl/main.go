@@ -70,35 +70,14 @@ func main() {
 	// Create default fetcher with timeout
 	defaultFetcher := fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
 		Timeout: *timeout,
-		Headers: fetch.FakeHeaders, // Use fake browser headers by default
+		Headers: fetch.FakeHeaders,
 	})
-
-	// Example: Create specialized fetchers for different domains
-	// You can create custom fetchers with different configurations
-	slowFetcher := fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
-		Timeout:     60 * time.Second, // Longer timeout for slow sites
-		Headers:     fetch.FakeHeaders,
-		MaxBodySize: 20 * 1024 * 1024, // 20MB for large pages
-	})
-
-	// Example fetcher rules
-	fetcherRules := []*crawler.FetcherRule{
-		// Use a slower fetcher for specific domains known to be slow
-		crawler.NewExactFetcherRule("slowsite.example.com", slowFetcher, 100),
-
-		// Use specialized fetcher for all .gov domains
-		crawler.NewSuffixFetcherRule(".gov", slowFetcher, 90),
-
-		// Use specialized fetcher for API subdomains
-		crawler.NewPrefixFetcherRule("api.", slowFetcher, 80),
-	}
 
 	// Create crawler
 	c, err := crawler.New(crawler.Options{
 		MaxURLs:        *maxURLs,
 		Workers:        *workers,
 		RequestDelay:   *delay,
-		FetcherRules:   fetcherRules,
 		DefaultFetcher: defaultFetcher,
 		FollowBehavior: followBehavior,
 		Logger:         logger,
