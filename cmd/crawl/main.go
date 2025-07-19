@@ -3,65 +3,141 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/myzie/web"
 	"github.com/myzie/web/crawler"
 	"github.com/myzie/web/fetch"
 )
 
-type Config struct {
-	MaxURLs        int
-	Workers        int
-	Timeout        time.Duration
-	URLs           string
-	FollowBehavior string
+func normalize(url string) string {
+	url = strings.TrimSpace(url)
+	if !strings.HasPrefix(url, "http") {
+		url = "https://" + url
+	}
+	return url
 }
 
 func main() {
-	var cfg Config
-	flag.IntVar(&cfg.MaxURLs, "max-urls", 100, "maximum number of URLs to crawl")
-	flag.IntVar(&cfg.Workers, "workers", 1, "number of workers to use")
-	flag.DurationVar(&cfg.Timeout, "timeout", 10*time.Second, "timeout for the fetcher")
-	flag.StringVar(&cfg.URLs, "urls", "", "comma separated list of URLs to crawl")
-	flag.StringVar(&cfg.FollowBehavior, "follow-behavior", "same-domain", "follow behavior")
+	// Parse command line flags
+	var (
+		urls         = flag.String("urls", "", "Comma-separated list of URLs to crawl")
+		inputFile    = flag.String("file", "", "File containing URLs to crawl")
+		maxURLs      = flag.Int("max-urls", 100, "Maximum number of URLs to crawl")
+		workers      = flag.Int("workers", 5, "Number of concurrent workers")
+		timeout      = flag.Duration("timeout", 30*time.Second, "Fetch timeout")
+		followMode   = flag.String("follow", "same-domain", "Link following behavior: any, same-domain, related-subdomains, none")
+		verbose      = flag.Bool("verbose", false, "Enable verbose logging")
+		showProgress = flag.Bool("progress", true, "Show progress updates")
+		delay        = flag.Duration("delay", 0, "Delay between requests")
+	)
 	flag.Parse()
 
-	urls := strings.Split(cfg.URLs, ",")
-	if len(urls) == 0 {
-		log.Fatal("no urls provided")
+	if *urls == "" && *inputFile == "" {
+		fmt.Fprintf(os.Stderr, "Error: -urls or -file flag is required\n")
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	// Configure logging
+	var logger *slog.Logger
+	if *verbose {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+	}
 
-	fetcher := fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
-		Timeout:     cfg.Timeout,
-		MaxBodySize: 10 * 1024 * 1024,
+	// Parse target URLs
+	var startURLs []string
+
+	if *urls != "" {
+		startURLs = strings.Split(*urls, ",")
+		for _, url := range startURLs {
+			startURLs = append(startURLs, normalize(url))
+		}
+	}
+
+	if *inputFile != "" {
+		items, err := web.ReadFileItems(*inputFile)
+		if err != nil {
+			log.Fatalf("Failed to read input file: %v", err)
+		}
+		for _, url := range items {
+			startURLs = append(startURLs, normalize(url))
+		}
+	}
+
+	// Parse follow behavior
+	var followBehavior crawler.FollowBehavior
+	switch *followMode {
+	case "any":
+		followBehavior = crawler.FollowAny
+	case "same-domain":
+		followBehavior = crawler.FollowSameDomain
+	case "related-subdomains":
+		followBehavior = crawler.FollowRelatedSubdomains
+	case "none":
+		followBehavior = crawler.FollowNone
+	default:
+		log.Fatalf("Invalid follow mode: %s", *followMode)
+	}
+
+	// Create default fetcher with timeout
+	defaultFetcher := fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
+		Timeout: *timeout,
+		Headers: fetch.FakeHeaders,
 	})
 
-	c := crawler.New(crawler.Options{
-		MaxURLs:        cfg.MaxURLs,
-		Workers:        cfg.Workers,
-		Fetcher:        fetcher,
+	// Create crawler
+	c, err := crawler.New(crawler.Options{
+		MaxURLs:        *maxURLs,
+		Workers:        *workers,
+		RequestDelay:   *delay,
+		DefaultFetcher: defaultFetcher,
+		FollowBehavior: followBehavior,
 		Logger:         logger,
-		ShowProgress:   true,
-		FollowBehavior: crawler.FollowBehavior(cfg.FollowBehavior),
+		ShowProgress:   *showProgress,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create crawler: %v", err)
+	}
 
-	callback := func(ctx context.Context, result *crawler.Result) {
+	// Start crawling
+	ctx := context.Background()
+	startTime := time.Now()
+
+	err = c.Crawl(ctx, startURLs, func(ctx context.Context, result *crawler.Result) {
 		if result.Error != nil {
-			logger.Error("error fetching", "url", result.URL, "error", result.Error)
+			logger.Error("Failed to crawl",
+				slog.String("url", result.URL.String()),
+				slog.String("error", result.Error.Error()))
 			return
 		}
-		logger.Info("crawled", "url", result.URL)
+		logger.Info("Crawled",
+			slog.String("url", result.URL.String()),
+			slog.Int("links", len(result.Links)),
+			slog.Int("status", result.Response.StatusCode))
+	})
+	if err != nil {
+		log.Fatalf("Crawling failed: %v", err)
 	}
 
-	if err := c.Crawl(context.Background(), urls, callback); err != nil {
-		log.Fatal(err)
-	}
+	// Print final statistics
+	stats := c.GetStats()
+	duration := time.Since(startTime)
+	crawledCount := stats.GetProcessed()
+	fmt.Printf("\nCrawling completed in %v\n", duration)
+	fmt.Printf("Total URLs processed: %d\n", crawledCount)
+	fmt.Printf("Successful: %d\n", stats.GetSucceeded())
+	fmt.Printf("Failed: %d\n", stats.GetFailed())
+	fmt.Printf("Average rate: %.2f pages/second\n", float64(crawledCount)/duration.Seconds())
 }

@@ -26,12 +26,6 @@ const (
 	FollowNone              FollowBehavior = "none"
 )
 
-// Parser is an interface describing a webpage parser. It accepts the fetched
-// page and returns a parsed object.
-type Parser interface {
-	Parse(ctx context.Context, page *fetch.Response) (any, error)
-}
-
 // Result represents the result of one page being crawled.
 type Result struct {
 	URL      *url.URL
@@ -49,12 +43,12 @@ type Options struct {
 	MaxURLs              int
 	Workers              int
 	Cache                cache.Cache
-	Fetcher              fetch.Fetcher
-	FetcherName          string
 	RequestDelay         time.Duration
 	KnownURLs            []string
-	Parsers              map[string]Parser
+	ParserRules          []*ParserRule
 	DefaultParser        Parser
+	FetcherRules         []*FetcherRule
+	DefaultFetcher       fetch.Fetcher
 	FollowBehavior       FollowBehavior
 	Logger               *slog.Logger
 	ShowProgress         bool
@@ -70,11 +64,11 @@ type Crawler struct {
 	workers              int
 	requestDelay         time.Duration
 	cache                cache.Cache
-	fetcher              fetch.Fetcher
-	fetcherName          string
 	knownURLs            []string
-	parsers              map[string]Parser
+	parserRules          []*ParserRule
 	defaultParser        Parser
+	fetcherRules         []*FetcherRule
+	defaultFetcher       fetch.Fetcher
 	followBehavior       FollowBehavior
 	activeWorkers        int64
 	stats                *CrawlerStats
@@ -82,10 +76,11 @@ type Crawler struct {
 	running              bool
 	showProgress         bool
 	showProgressInterval time.Duration
+	cancel               context.CancelFunc
 }
 
 // New creates a new crawler.
-func New(opts Options) *Crawler {
+func New(opts Options) (*Crawler, error) {
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -96,23 +91,77 @@ func New(opts Options) *Crawler {
 	if opts.QueueSize <= 0 {
 		opts.QueueSize = 10000
 	}
-	return &Crawler{
+	if opts.FollowBehavior == "" {
+		opts.FollowBehavior = FollowSameDomain
+	}
+	c := &Crawler{
 		cache:                opts.Cache,
 		maxURLs:              opts.MaxURLs,
 		workers:              opts.Workers,
 		requestDelay:         opts.RequestDelay,
-		fetcher:              opts.Fetcher,
-		fetcherName:          opts.FetcherName,
+		defaultFetcher:       opts.DefaultFetcher,
 		knownURLs:            opts.KnownURLs,
-		parsers:              opts.Parsers,
-		followBehavior:       opts.FollowBehavior,
 		defaultParser:        opts.DefaultParser,
+		followBehavior:       opts.FollowBehavior,
 		stats:                &CrawlerStats{},
 		logger:               logger,
 		showProgress:         opts.ShowProgress,
 		showProgressInterval: opts.ShowProgressInterval,
 		queue:                make(chan string, opts.QueueSize),
 	}
+	if err := c.AddParserRules(opts.ParserRules...); err != nil {
+		return nil, err
+	}
+	if err := c.AddFetcherRules(opts.FetcherRules...); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// sortRulesByPriority sorts parser rules by priority (higher priority first)
+func (c *Crawler) sortRulesByPriority() {
+	sort.Slice(c.parserRules, func(i, j int) bool {
+		return c.parserRules[i].Priority > c.parserRules[j].Priority
+	})
+}
+
+// AddParserRules adds new parser rules to the crawler. The rules will be
+// re-sorted by priority after adding.
+func (c *Crawler) AddParserRules(rule ...*ParserRule) error {
+	for _, rule := range rule {
+		// Compile regex patterns if needed
+		if err := rule.Compile(); err != nil {
+			return err
+		}
+		// Add the rule
+		c.parserRules = append(c.parserRules, rule)
+	}
+	// Re-sort by priority
+	c.sortRulesByPriority()
+	return nil
+}
+
+// AddFetcherRules adds new fetcher rules to the crawler. The rules will be
+// re-sorted by priority after adding.
+func (c *Crawler) AddFetcherRules(rules ...*FetcherRule) error {
+	for _, rule := range rules {
+		// Compile regex patterns if needed
+		if err := rule.Compile(); err != nil {
+			return err
+		}
+		// Add the rule
+		c.fetcherRules = append(c.fetcherRules, rule)
+	}
+	// Re-sort by priority
+	c.sortFetcherRulesByPriority()
+	return nil
+}
+
+// sortFetcherRulesByPriority sorts fetcher rules by priority (higher priority first)
+func (c *Crawler) sortFetcherRulesByPriority() {
+	sort.Slice(c.fetcherRules, func(i, j int) bool {
+		return c.fetcherRules[i].Priority > c.fetcherRules[j].Priority
+	})
 }
 
 // incrementActiveWorkers atomically increments the active workers counter
@@ -130,13 +179,6 @@ func (c *Crawler) getActiveWorkers() int64 {
 	return atomic.LoadInt64(&c.activeWorkers)
 }
 
-func (c *Crawler) getFetcherName() string {
-	if c.fetcherName != "" {
-		return c.fetcherName
-	}
-	return "http"
-}
-
 // Crawl the provided URLs and call the callback for each processed page.
 // Links may be followed depending on the configured follow behavior.
 func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) error {
@@ -146,10 +188,11 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	c.running = true
 
 	// This context will be used to stop workers when the work is done
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, c.cancel = context.WithCancel(ctx)
 	defer func() {
 		c.running = false
-		cancel()
+		c.cancel()
+		c.cancel = nil
 	}()
 
 	// Start workers
@@ -166,7 +209,7 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	}
 
 	// Start idle monitor to detect when no more work is available
-	go c.idleMonitor(ctx, cancel)
+	go c.idleMonitor(ctx, c.cancel)
 
 	// Queue initial URLs
 	count, err := c.enqueue(ctx, urls)
@@ -180,6 +223,12 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	// Wait for workers to complete
 	wg.Wait()
 	return nil
+}
+
+func (c *Crawler) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 func (c *Crawler) enqueue(ctx context.Context, urls []string) (int, error) {
@@ -264,18 +313,30 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 		}
 	}
 
+	// Get the appropriate fetcher for this domain
+	fetcher, exists := c.getFetcher(domain)
+	if !exists {
+		c.logger.Error("no fetcher configured",
+			slog.String("url", rawURL),
+			slog.String("domain", domain))
+		callback(ctx, &Result{URL: parsedURL, Error: errors.New("no fetcher configured for domain")})
+		c.stats.IncrementFailed()
+		return
+	}
+
 	// Create fetch request
 	req := &fetch.Request{
 		URL:             rawURL,
 		Prettify:        false,
 		OnlyMainContent: false,
-		Fetcher:         c.getFetcherName(),
+		// Note: The Fetcher field in Request is for specifying a fetcher name/type
+		// We'll leave it empty and use the actual fetcher instance directly
 	}
 
 	// Fetch if there was not a cache hit
 	if response == nil {
 		c.logger.Debug("fetching", slog.String("url", rawURL))
-		response, err = c.fetcher.Fetch(ctx, req)
+		response, err = fetcher.Fetch(ctx, req)
 		if err != nil {
 			callback(ctx, &Result{URL: parsedURL, Error: err})
 			c.stats.IncrementFailed()
@@ -321,27 +382,38 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 	c.stats.IncrementSucceeded()
 
 	filteredURLs := c.filterLinks(parsedURL, discoveredLinks)
-	filteredCount := len(filteredURLs)
-	enqueuedCount, err := c.enqueue(ctx, filteredURLs)
-	if err != nil {
+	if _, err := c.enqueue(ctx, filteredURLs); err != nil {
 		c.logger.Warn("failed to enqueue discovered urls",
 			slog.String("url", rawURL),
 			slog.String("error", err.Error()))
 	}
-	if enqueuedCount < filteredCount {
-		c.logger.Warn("failed to enqueue all discovered urls",
-			slog.String("url", rawURL),
-			slog.Int("filtered", filteredCount),
-			slog.Int("enqueued", enqueuedCount))
-	}
 }
 
 func (c *Crawler) getParser(domain string) (Parser, bool) {
-	if parser, exists := c.parsers[domain]; exists {
-		return parser, true
+	// Check parser rules (already sorted by priority)
+	for _, rule := range c.parserRules {
+		if rule.Matches(domain) {
+			return rule.Parser, true
+		}
 	}
+	// Fall back to default parser
 	if c.defaultParser != nil {
 		return c.defaultParser, true
+	}
+	return nil, false
+}
+
+// getFetcher returns the appropriate fetcher for the given domain based on rules
+func (c *Crawler) getFetcher(domain string) (fetch.Fetcher, bool) {
+	// Check fetcher rules (already sorted by priority)
+	for _, rule := range c.fetcherRules {
+		if rule.Matches(domain) {
+			return rule.Fetcher, true
+		}
+	}
+	// Fall back to default fetcher
+	if c.defaultFetcher != nil {
+		return c.defaultFetcher, true
 	}
 	return nil, false
 }
@@ -375,7 +447,7 @@ func (c *Crawler) filterLinks(pageURL *url.URL, links []string) []string {
 func (c *Crawler) extractURLs(links []*fetch.Link, domain string) []string {
 	urlMap := make(map[string]bool)
 	for _, link := range links {
-		if url, ok := ResolveLink(domain, link.URL); ok {
+		if url, ok := web.ResolveLink(domain, link.URL); ok {
 			urlMap[url] = true
 		}
 	}
@@ -385,54 +457,6 @@ func (c *Crawler) extractURLs(links []*fetch.Link, domain string) []string {
 	}
 	sort.Strings(results)
 	return results
-}
-
-func ResolveLink(domain, value string) (string, bool) {
-	// Parse the input URL
-	parsedURL, err := url.Parse(value)
-	if err != nil {
-		return "", false
-	}
-
-	// Remove fragment
-	parsedURL.Fragment = ""
-
-	// Check if it's already absolute
-	if parsedURL.IsAbs() {
-		// Only accept HTTP/HTTPS schemes
-		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-			return "", false
-		}
-		// Normalize and return
-		normalizedURL, err := web.NormalizeURL(parsedURL.String())
-		if err != nil {
-			return "", false
-		}
-		return normalizedURL.String(), true
-	}
-
-	// For relative URLs, we need to resolve against the domain
-	// First, ensure domain has a scheme
-	baseDomain := domain
-	if !strings.HasPrefix(baseDomain, "http://") && !strings.HasPrefix(baseDomain, "https://") {
-		baseDomain = "https://" + baseDomain
-	}
-
-	// Parse the base domain
-	baseURL, err := url.Parse(baseDomain)
-	if err != nil {
-		return "", false
-	}
-
-	// Resolve the relative URL against the base
-	resolvedURL := baseURL.ResolveReference(parsedURL)
-
-	// Normalize and return
-	normalizedURL, err := web.NormalizeURL(resolvedURL.String())
-	if err != nil {
-		return "", false
-	}
-	return normalizedURL.String(), true
 }
 
 func (c *Crawler) progressReporter(ctx context.Context) {
