@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/myzie/web"
 	"github.com/myzie/web/cache"
 	"github.com/myzie/web/fetch"
 	"github.com/stretchr/testify/assert"
@@ -325,7 +326,7 @@ func TestResolveLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, valid := ResolveLink(tt.domain, tt.link)
+			result, valid := web.ResolveLink(tt.domain, tt.link)
 			assert.Equal(t, tt.valid, valid)
 			if valid {
 				assert.Equal(t, tt.expected, result)

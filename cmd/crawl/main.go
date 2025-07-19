@@ -10,14 +10,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/myzie/web"
 	"github.com/myzie/web/crawler"
 	"github.com/myzie/web/fetch"
 )
+
+func normalize(url string) string {
+	url = strings.TrimSpace(url)
+	if !strings.HasPrefix(url, "http") {
+		url = "https://" + url
+	}
+	return url
+}
 
 func main() {
 	// Parse command line flags
 	var (
 		urls         = flag.String("urls", "", "Comma-separated list of URLs to crawl")
+		inputFile    = flag.String("file", "", "File containing URLs to crawl")
 		maxURLs      = flag.Int("max-urls", 100, "Maximum number of URLs to crawl")
 		workers      = flag.Int("workers", 5, "Number of concurrent workers")
 		timeout      = flag.Duration("timeout", 30*time.Second, "Fetch timeout")
@@ -28,8 +38,8 @@ func main() {
 	)
 	flag.Parse()
 
-	if *urls == "" {
-		fmt.Fprintf(os.Stderr, "Error: -urls flag is required\n")
+	if *urls == "" && *inputFile == "" {
+		fmt.Fprintf(os.Stderr, "Error: -urls or -file flag is required\n")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -46,10 +56,24 @@ func main() {
 		}))
 	}
 
-	// Parse URLs
-	startURLs := strings.Split(*urls, ",")
-	for i, url := range startURLs {
-		startURLs[i] = strings.TrimSpace(url)
+	// Parse target URLs
+	var startURLs []string
+
+	if *urls != "" {
+		startURLs = strings.Split(*urls, ",")
+		for _, url := range startURLs {
+			startURLs = append(startURLs, normalize(url))
+		}
+	}
+
+	if *inputFile != "" {
+		items, err := web.ReadFileItems(*inputFile)
+		if err != nil {
+			log.Fatalf("Failed to read input file: %v", err)
+		}
+		for _, url := range items {
+			startURLs = append(startURLs, normalize(url))
+		}
 	}
 
 	// Parse follow behavior
@@ -90,23 +114,19 @@ func main() {
 	// Start crawling
 	ctx := context.Background()
 	startTime := time.Now()
-	var crawledCount int
 
 	err = c.Crawl(ctx, startURLs, func(ctx context.Context, result *crawler.Result) {
-		crawledCount++
 		if result.Error != nil {
 			logger.Error("Failed to crawl",
 				slog.String("url", result.URL.String()),
 				slog.String("error", result.Error.Error()))
 			return
 		}
-
 		logger.Info("Crawled",
 			slog.String("url", result.URL.String()),
 			slog.Int("links", len(result.Links)),
 			slog.Int("status", result.Response.StatusCode))
 	})
-
 	if err != nil {
 		log.Fatalf("Crawling failed: %v", err)
 	}
@@ -114,8 +134,9 @@ func main() {
 	// Print final statistics
 	stats := c.GetStats()
 	duration := time.Since(startTime)
+	crawledCount := stats.GetProcessed()
 	fmt.Printf("\nCrawling completed in %v\n", duration)
-	fmt.Printf("Total URLs processed: %d\n", stats.GetProcessed())
+	fmt.Printf("Total URLs processed: %d\n", crawledCount)
 	fmt.Printf("Successful: %d\n", stats.GetSucceeded())
 	fmt.Printf("Failed: %d\n", stats.GetFailed())
 	fmt.Printf("Average rate: %.2f pages/second\n", float64(crawledCount)/duration.Seconds())

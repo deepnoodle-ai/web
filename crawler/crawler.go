@@ -382,18 +382,10 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 	c.stats.IncrementSucceeded()
 
 	filteredURLs := c.filterLinks(parsedURL, discoveredLinks)
-	filteredCount := len(filteredURLs)
-	enqueuedCount, err := c.enqueue(ctx, filteredURLs)
-	if err != nil {
+	if _, err := c.enqueue(ctx, filteredURLs); err != nil {
 		c.logger.Warn("failed to enqueue discovered urls",
 			slog.String("url", rawURL),
 			slog.String("error", err.Error()))
-	}
-	if enqueuedCount < filteredCount {
-		c.logger.Warn("failed to enqueue all discovered urls",
-			slog.String("url", rawURL),
-			slog.Int("filtered", filteredCount),
-			slog.Int("enqueued", enqueuedCount))
 	}
 }
 
@@ -455,7 +447,7 @@ func (c *Crawler) filterLinks(pageURL *url.URL, links []string) []string {
 func (c *Crawler) extractURLs(links []*fetch.Link, domain string) []string {
 	urlMap := make(map[string]bool)
 	for _, link := range links {
-		if url, ok := ResolveLink(domain, link.URL); ok {
+		if url, ok := web.ResolveLink(domain, link.URL); ok {
 			urlMap[url] = true
 		}
 	}
@@ -465,54 +457,6 @@ func (c *Crawler) extractURLs(links []*fetch.Link, domain string) []string {
 	}
 	sort.Strings(results)
 	return results
-}
-
-func ResolveLink(domain, value string) (string, bool) {
-	// Parse the input URL
-	parsedURL, err := url.Parse(value)
-	if err != nil {
-		return "", false
-	}
-
-	// Remove fragment
-	parsedURL.Fragment = ""
-
-	// Check if it's already absolute
-	if parsedURL.IsAbs() {
-		// Only accept HTTP/HTTPS schemes
-		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-			return "", false
-		}
-		// Normalize and return
-		normalizedURL, err := web.NormalizeURL(parsedURL.String())
-		if err != nil {
-			return "", false
-		}
-		return normalizedURL.String(), true
-	}
-
-	// For relative URLs, we need to resolve against the domain
-	// First, ensure domain has a scheme
-	baseDomain := domain
-	if !strings.HasPrefix(baseDomain, "http://") && !strings.HasPrefix(baseDomain, "https://") {
-		baseDomain = "https://" + baseDomain
-	}
-
-	// Parse the base domain
-	baseURL, err := url.Parse(baseDomain)
-	if err != nil {
-		return "", false
-	}
-
-	// Resolve the relative URL against the base
-	resolvedURL := baseURL.ResolveReference(parsedURL)
-
-	// Normalize and return
-	normalizedURL, err := web.NormalizeURL(resolvedURL.String())
-	if err != nil {
-		return "", false
-	}
-	return normalizedURL.String(), true
 }
 
 func (c *Crawler) progressReporter(ctx context.Context) {
