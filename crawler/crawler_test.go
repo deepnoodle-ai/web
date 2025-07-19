@@ -12,108 +12,8 @@ import (
 	"github.com/myzie/web/cache"
 	"github.com/myzie/web/fetch"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// MockCache implements the cache.Cache interface for testing
-type MockCache struct {
-	data  map[string][]byte
-	mutex sync.RWMutex
-}
-
-func NewMockCache() *MockCache {
-	return &MockCache{
-		data: make(map[string][]byte),
-	}
-}
-
-func (m *MockCache) Get(ctx context.Context, key string) ([]byte, error) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if value, exists := m.data[key]; exists {
-		return value, nil
-	}
-	return nil, cache.NotFound
-}
-
-func (m *MockCache) Set(ctx context.Context, key string, value []byte) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.data[key] = value
-	return nil
-}
-
-func (m *MockCache) Delete(ctx context.Context, key string) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	delete(m.data, key)
-	return nil
-}
-
-// MockFetcher implements the fetch.Fetcher interface for testing
-type MockFetcher struct {
-	mock.Mock
-	responses map[string]*fetch.Response
-	errors    map[string]error
-	mutex     sync.RWMutex
-}
-
-func NewMockFetcher() *MockFetcher {
-	return &MockFetcher{
-		responses: make(map[string]*fetch.Response),
-		errors:    make(map[string]error),
-	}
-}
-
-func (m *MockFetcher) AddResponse(url string, response *fetch.Response) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.responses[url] = response
-}
-
-func (m *MockFetcher) AddError(url string, err error) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.errors[url] = err
-}
-
-func (m *MockFetcher) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response, error) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if err, exists := m.errors[req.URL]; exists {
-		return nil, err
-	}
-
-	if response, exists := m.responses[req.URL]; exists {
-		return response, nil
-	}
-
-	return nil, fmt.Errorf("no mock response configured for URL: %s", req.URL)
-}
-
-// MockParser implements the Parser interface for testing
-type MockParser struct {
-	mock.Mock
-	parseFunc func(ctx context.Context, page *fetch.Response) (any, error)
-}
-
-func NewMockParser() *MockParser {
-	return &MockParser{}
-}
-
-func (m *MockParser) SetParseFunc(fn func(ctx context.Context, page *fetch.Response) (any, error)) {
-	m.parseFunc = fn
-}
-
-func (m *MockParser) Parse(ctx context.Context, page *fetch.Response) (any, error) {
-	if m.parseFunc != nil {
-		return m.parseFunc(ctx, page)
-	}
-	return map[string]string{"parsed": "data"}, nil
-}
 
 // Test fixtures
 func setupTestFixtures(t *testing.T) string {
@@ -191,7 +91,7 @@ func loadFixture(t *testing.T, fixturesDir, filename string) string {
 }
 
 func TestCrawler_New(t *testing.T) {
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 
 	opts := Options{
 		MaxURLs:        100,
@@ -212,7 +112,7 @@ func TestCrawler_New(t *testing.T) {
 
 func TestCrawler_BasicCrawl(t *testing.T) {
 	fixturesDir := setupTestFixtures(t)
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 
 	// Setup mock responses
 	indexHTML := loadFixture(t, fixturesDir, "index.html")
@@ -251,12 +151,11 @@ func TestCrawler_BasicCrawl(t *testing.T) {
 	var processedData []any
 	mu := sync.Mutex{}
 
-	callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+	callback := func(ctx context.Context, result *Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		processedURLs = append(processedURLs, req.URL)
-		processedData = append(processedData, parsed)
-		return nil
+		processedURLs = append(processedURLs, result.URL.String())
+		processedData = append(processedData, result.Parsed)
 	}
 
 	ctx := context.Background()
@@ -271,7 +170,7 @@ func TestCrawler_BasicCrawl(t *testing.T) {
 
 func TestCrawler_WithParser(t *testing.T) {
 	fixturesDir := setupTestFixtures(t)
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 	mockParser := NewMockParser()
 
 	indexHTML := loadFixture(t, fixturesDir, "index.html")
@@ -303,13 +202,12 @@ func TestCrawler_WithParser(t *testing.T) {
 	var parsedResults []any
 	mu := sync.Mutex{}
 
-	callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+	callback := func(ctx context.Context, result *Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		if parsed != nil {
-			parsedResults = append(parsedResults, parsed)
+		if result.Parsed != nil {
+			parsedResults = append(parsedResults, result.Parsed)
 		}
-		return nil
 	}
 
 	ctx := context.Background()
@@ -321,9 +219,9 @@ func TestCrawler_WithParser(t *testing.T) {
 }
 
 func TestCrawler_WithCache(t *testing.T) {
-	htmlCache := NewMockCache()
+	htmlCache := cache.NewInMemoryCache()
 
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 	testHTML := "<html><body><h1>Cached Content</h1></body></html>"
 
 	// Pre-populate cache
@@ -339,10 +237,9 @@ func TestCrawler_WithCache(t *testing.T) {
 		FollowBehavior: FollowNone,
 	})
 
-	callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+	callback := func(ctx context.Context, result *Result) {
 		// The callback won't receive the HTML directly, but we can verify
 		// the cache was used by checking that fetcher was not called
-		return nil
 	}
 
 	ctx := context.Background()
@@ -482,7 +379,7 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockFetcher := NewMockFetcher()
+			mockFetcher := fetch.NewMockFetcher()
 
 			// Setup main page response
 			links := make([]*fetch.Link, len(tt.discoveredURLs))
@@ -522,11 +419,10 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 			var processedURLs []string
 			mu := sync.Mutex{}
 
-			callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+			callback := func(ctx context.Context, result *Result) {
 				mu.Lock()
 				defer mu.Unlock()
-				processedURLs = append(processedURLs, req.URL)
-				return nil
+				processedURLs = append(processedURLs, result.URL.String())
 			}
 
 			ctx := context.Background()
@@ -547,7 +443,7 @@ func TestCrawler_FollowBehavior(t *testing.T) {
 }
 
 func TestCrawler_ErrorHandling(t *testing.T) {
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 
 	// Setup error for one URL and success for another
 	mockFetcher.AddError("https://error.com", fmt.Errorf("fetch failed"))
@@ -569,14 +465,13 @@ func TestCrawler_ErrorHandling(t *testing.T) {
 	var errors []error
 	mu := sync.Mutex{}
 
-	callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+	callback := func(ctx context.Context, result *Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		processedURLs = append(processedURLs, req.URL)
-		if err != nil {
-			errors = append(errors, err)
+		processedURLs = append(processedURLs, result.URL.String())
+		if result.Error != nil {
+			errors = append(errors, result.Error)
 		}
-		return nil
 	}
 
 	ctx := context.Background()
@@ -594,7 +489,7 @@ func TestCrawler_ErrorHandling(t *testing.T) {
 }
 
 func TestCrawler_MaxURLsLimit(t *testing.T) {
-	mockFetcher := NewMockFetcher()
+	mockFetcher := fetch.NewMockFetcher()
 
 	// Setup responses for multiple URLs
 	urls := []string{
@@ -624,11 +519,10 @@ func TestCrawler_MaxURLsLimit(t *testing.T) {
 	var processedURLs []string
 	mu := sync.Mutex{}
 
-	callback := func(ctx context.Context, req *fetch.Request, parsed any, err error) error {
+	callback := func(ctx context.Context, result *Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		processedURLs = append(processedURLs, req.URL)
-		return nil
+		processedURLs = append(processedURLs, result.URL.String())
 	}
 
 	ctx := context.Background()

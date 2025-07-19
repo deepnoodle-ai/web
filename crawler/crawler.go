@@ -21,8 +21,8 @@ type FollowBehavior string
 
 const (
 	FollowAny               FollowBehavior = "any"
-	FollowSameDomain        FollowBehavior = "same_domain"
-	FollowRelatedSubdomains FollowBehavior = "related_subdomains"
+	FollowSameDomain        FollowBehavior = "same-domain"
+	FollowRelatedSubdomains FollowBehavior = "related-subdomains"
 	FollowNone              FollowBehavior = "none"
 )
 
@@ -32,8 +32,17 @@ type Parser interface {
 	Parse(ctx context.Context, page *fetch.Response) (any, error)
 }
 
+// Result represents the result of one page being crawled.
+type Result struct {
+	URL      *url.URL
+	Parsed   any
+	Links    []string
+	Response *fetch.Response
+	Error    error
+}
+
 // ProcessCallback is called with the fetch request and parsed result (if any)
-type Callback func(ctx context.Context, req *fetch.Request, parsed any, err error)
+type Callback func(ctx context.Context, result *Result)
 
 // Options used to configure a crawler.
 type Options struct {
@@ -136,6 +145,7 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	}
 	c.running = true
 
+	// This context will be used to stop workers when the work is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
 		c.running = false
@@ -146,11 +156,11 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 	var wg sync.WaitGroup
 	for i := 0; i < c.workers; i++ {
 		wg.Add(1)
-		go c.worker(ctx, i, &wg, callback)
+		go c.worker(ctx, &wg, callback)
 	}
 	defer close(c.queue)
 
-	// Start progress reporter
+	// Optionally start the progress reporter
 	if c.showProgress {
 		go c.progressReporter(ctx)
 	}
@@ -173,26 +183,43 @@ func (c *Crawler) Crawl(ctx context.Context, urls []string, callback Callback) e
 }
 
 func (c *Crawler) enqueue(ctx context.Context, urls []string) (int, error) {
+	// Prevent exceeding the max URLs limit
+	if c.maxURLs > 0 {
+		allowedCount := c.maxURLs - int(c.stats.GetProcessed())
+		if allowedCount <= 0 {
+			return 0, nil
+		}
+		if allowedCount < len(urls) {
+			urls = urls[:allowedCount]
+		}
+	}
+	// Normalize and enqueue the URLs
 	queued := 0
 	for _, rawURL := range urls {
 		url, err := web.NormalizeURL(rawURL)
 		if err != nil {
-			return queued, err
+			c.logger.Warn("invalid url",
+				slog.String("url", rawURL),
+				slog.String("error", err.Error()))
+			continue
 		}
-		value := url.String()
+		value := strings.TrimSuffix(url.String(), "/")
+		// Only enqueue if not already processed
 		if _, exists := c.processedURLs.LoadOrStore(value, true); !exists {
 			select {
 			case c.queue <- value:
 				queued++
 			case <-ctx.Done():
 				return queued, ctx.Err()
+			default:
+				// Queue is full, skip this URL
 			}
 		}
 	}
 	return queued, nil
 }
 
-func (c *Crawler) worker(ctx context.Context, workerID int, wg *sync.WaitGroup, callback Callback) {
+func (c *Crawler) worker(ctx context.Context, wg *sync.WaitGroup, callback Callback) {
 	defer wg.Done()
 	for {
 		select {
@@ -200,9 +227,6 @@ func (c *Crawler) worker(ctx context.Context, workerID int, wg *sync.WaitGroup, 
 			return
 		case rawURL, ok := <-c.queue:
 			if !ok {
-				return
-			}
-			if c.stats.GetProcessed() >= int64(c.maxURLs) {
 				return
 			}
 			c.incrementActiveWorkers()
@@ -253,7 +277,7 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 		c.logger.Debug("fetching", slog.String("url", rawURL))
 		response, err = c.fetcher.Fetch(ctx, req)
 		if err != nil {
-			callback(ctx, req, nil, err)
+			callback(ctx, &Result{URL: parsedURL, Error: err})
 			c.stats.IncrementFailed()
 			return
 		}
@@ -268,9 +292,7 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 
 	// Parse if a parser exists for the domain
 	var parsed any
-	var discoveredURLs []string
 	var parseErr error
-
 	parser, exists := c.getParser(domain)
 	if exists {
 		c.logger.Info("parsing with domain parser",
@@ -285,14 +307,33 @@ func (c *Crawler) processURL(ctx context.Context, rawURL string, callback Callba
 	}
 
 	// Extract URLs from the page
+	var discoveredLinks []string
 	if response.Links != nil {
-		discoveredURLs = c.extractURLs(response.Links, domain)
+		discoveredLinks = c.extractURLs(response.Links, domain)
 	}
-
-	callback(ctx, req, parsed, parseErr)
-	filteredURLs := c.filterURLs(parsedURL, discoveredURLs)
-	c.queueDiscoveredURLs(ctx, filteredURLs)
+	callback(ctx, &Result{
+		URL:      parsedURL,
+		Parsed:   parsed,
+		Links:    discoveredLinks,
+		Response: response,
+		Error:    parseErr,
+	})
 	c.stats.IncrementSucceeded()
+
+	filteredURLs := c.filterLinks(parsedURL, discoveredLinks)
+	filteredCount := len(filteredURLs)
+	enqueuedCount, err := c.enqueue(ctx, filteredURLs)
+	if err != nil {
+		c.logger.Warn("failed to enqueue discovered urls",
+			slog.String("url", rawURL),
+			slog.String("error", err.Error()))
+	}
+	if enqueuedCount < filteredCount {
+		c.logger.Warn("failed to enqueue all discovered urls",
+			slog.String("url", rawURL),
+			slog.Int("filtered", filteredCount),
+			slog.Int("enqueued", enqueuedCount))
+	}
 }
 
 func (c *Crawler) getParser(domain string) (Parser, bool) {
@@ -305,7 +346,7 @@ func (c *Crawler) getParser(domain string) (Parser, bool) {
 	return nil, false
 }
 
-func (c *Crawler) filterURLs(pageURL *url.URL, links []string) []string {
+func (c *Crawler) filterLinks(pageURL *url.URL, links []string) []string {
 	if c.followBehavior == FollowNone {
 		return nil
 	}
@@ -392,34 +433,6 @@ func ResolveLink(domain, value string) (string, bool) {
 		return "", false
 	}
 	return normalizedURL.String(), true
-}
-
-func (c *Crawler) queueDiscoveredURLs(ctx context.Context, urls []string) {
-	var next []string
-	for _, rawURL := range urls {
-		if c.stats.GetProcessed() >= int64(c.maxURLs) {
-			return
-		}
-		u, err := web.NormalizeURL(rawURL)
-		if err != nil {
-			c.logger.Warn("invalid url",
-				slog.String("url", rawURL),
-				slog.String("error", err.Error()))
-			continue
-		}
-		rawURL = u.String()
-		if _, exists := c.processedURLs.LoadOrStore(rawURL, true); !exists {
-			next = append(next, rawURL)
-		}
-	}
-
-	select {
-	case c.queue <- urlStr:
-	case <-ctx.Done():
-		return
-	default:
-		// Queue is full, skip this URL
-	}
 }
 
 func (c *Crawler) progressReporter(ctx context.Context) {
