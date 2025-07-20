@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	"time"
 
 	"github.com/myzie/web"
 )
@@ -44,6 +45,7 @@ type Response struct {
 	Metadata     Metadata          `json:"metadata,omitempty"`
 	Links        []*Link           `json:"links,omitempty"`
 	StorageState map[string]any    `json:"storage_state,omitempty"`
+	Timestamp    time.Time         `json:"timestamp,omitzero"`
 }
 
 // Fetcher defines an interface for fetching pages.

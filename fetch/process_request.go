@@ -3,6 +3,7 @@ package fetch
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/myzie/web"
 )
@@ -80,5 +81,6 @@ func ProcessRequest(request *Request, html string) (*Response, error) {
 		Markdown:   markdownContent,
 		Metadata:   Metadata(metadata),
 		Links:      links,
+		Timestamp:  time.Now().UTC(),
 	}, nil
 }
