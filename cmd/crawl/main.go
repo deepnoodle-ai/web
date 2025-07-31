@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myzie/web"
-	"github.com/myzie/web/crawler"
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web"
+	"github.com/deepnoodle-ai/web/crawler"
+	"github.com/deepnoodle-ai/web/fetch"
 )
 
 func normalize(url string) string {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web/fetch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

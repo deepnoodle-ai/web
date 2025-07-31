@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/myzie/web"
+	"github.com/deepnoodle-ai/web"
 )
 
 // Type aliases for convenience.

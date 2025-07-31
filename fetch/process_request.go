@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myzie/web"
+	"github.com/deepnoodle-ai/web"
 )
 
 // ProcessRequest applies request options to the given HTML content and builds

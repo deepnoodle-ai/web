@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/myzie/web"
-	"github.com/myzie/web/cache"
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web"
+	"github.com/deepnoodle-ai/web/cache"
+	"github.com/deepnoodle-ai/web/fetch"
 )
 
 // FollowBehavior is used to determine how to follow links.

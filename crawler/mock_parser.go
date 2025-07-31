@@ -3,7 +3,7 @@ package crawler
 import (
 	"context"
 
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web/fetch"
 	"github.com/stretchr/testify/mock"
 )
 

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web/fetch"
 )
 
 // MatchType defines the type of pattern matching for rules

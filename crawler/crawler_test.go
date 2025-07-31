@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/myzie/web"
-	"github.com/myzie/web/cache"
-	"github.com/myzie/web/fetch"
+	"github.com/deepnoodle-ai/web"
+	"github.com/deepnoodle-ai/web/cache"
+	"github.com/deepnoodle-ai/web/fetch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
