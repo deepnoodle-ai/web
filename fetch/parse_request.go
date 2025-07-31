@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/myzie/web/errors"
+	"github.com/deepnoodle-ai/web/errors"
 )
 
 // ParsePostRequest parses a fetch.Request from a POST request body.

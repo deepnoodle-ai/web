@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/myzie/web/errors"
+	"github.com/deepnoodle-ai/web/errors"
 )
 
 // ClientOptions defines the options for the client.

@@ -1,4 +1,4 @@
-module github.com/myzie/web
+module github.com/deepnoodle-ai/web
 
 go 1.24.4
 

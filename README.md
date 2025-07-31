@@ -5,7 +5,7 @@ A lightweight Go library for working with web pages, URLs, and HTML documents.
 ## Installation
 
 ```bash
-go get github.com/myzie/web
+go get github.com/deepnoodle-ai/web
 ```
 
 ## Quick Start
@@ -17,7 +17,7 @@ package main
 
 import (
     "fmt"
-    "github.com/myzie/web"
+    "github.com/deepnoodle-ai/web"
 )
 
 func main() {
@@ -39,7 +39,7 @@ package main
 
 import (
     "fmt"
-    "github.com/myzie/web"
+    "github.com/deepnoodle-ai/web"
 )
 
 func main() {
@@ -90,7 +90,7 @@ package main
 import (
     "fmt"
     "net/url"
-    "github.com/myzie/web"
+    "github.com/deepnoodle-ai/web"
 )
 
 func main() {
